@@ -1,0 +1,113 @@
+cd #Trimming adapters in DNA seq
+
+nohup trim_galore --paired MSS1234561_SA_L001_R1_001.fastq.gz MSS1234561_SA_L001_R2_001.fastq.gz > fastq1.out &
+nohup trim_galore --paired MSS1234562_SA_L001_R1_001.fastq.gz MSS1234562_SA_L001_R2_001.fastq.gz > fastq2.out &
+nohup trim_galore --paired MSS1234563_SA_L001_R1_001.fastq.gz MSS1234563_SA_L001_R2_001.fastq.gz > fastq3.out &
+nohup trim_galore --paired MSS1234564_SA_L001_R1_001.fastq.gz MSS1234564_SA_L001_R2_001.fastq.gz > fastq4.out &
+
+#For FASTQC of the trimmed data
+
+fastqc --threads 64 -f fastq $F1 $F2 -o /file dir/.out
+
+# For running manual 1 file then we can remove thread.
+# --kmers can be added to above fastqc command to show diagram of base distribution.
+
+#Combination command
+
+nohup trim_galore --paired --fastqc Filename1 File name2 -o /destination folder/ &
+
+#CTGTCTCTTATA Nextera Transposase sequence for this analysis (dante lab was trimmed)
+
+#Ref. File: /home/Genomes/Human/hg38/ensembl/Homo_sapiens.GRCh38.dna.primary_assembly.fa
+
+# To build index in BWA
+bwa index resources_broad_hg38_v0_Homo_sapiens_assembly38.fasta /ref.fasta
+
+#GATK Pipeline follows BWA Men allignment
+bwa mem -R "@RG\tID:MSS61\tSM:MSS61\tPL:Illumina\tLB:MSS61_lib" -t 16 -M resources_broad_hg38_v0_Homo_sapiens_assembly38.fasta MSS1234561_SA_L001_R1_001_val_1.fq.gz MSS1234561_SA_L001_R2_001_val_2.fq.gz > MSS61.sam
+bwa mem -R "@RG\tID:MSS62\tSM:MSS62\tPL:Illumina\tLB:MSS62_lib" -t 16 -M resources_broad_hg38_v0_Homo_sapiens_assembly38.fasta MSS1234562_SA_L001_R1_001_val_1.fq.gz MSS1234562_SA_L001_R2_001_val_2.fq.gz > MSS62.sam
+bwa mem -R "@RG\tID:MSS63\tSM:MSS63\tPL:Illumina\tLB:MSS63_lib" -t 16 -M resources_broad_hg38_v0_Homo_sapiens_assembly38.fasta MSS1234563_SA_L001_R1_001_val_1.fq.gz MSS1234563_SA_L001_R2_001_val_2.fq.gz > MSS63.sam
+bwa mem -R "@RG\tID:MSS64\tSM:MSS64\tPL:Illumina\tLB:MSS64_lib" -t 16 -M resources_broad_hg38_v0_Homo_sapiens_assembly38.fasta MSS1234564_SA_L001_R1_001_val_1.fq.gz MSS1234564_SA_L001_R2_001_val_2.fq.gz > MSS64.sam
+
+# SAMtools to convert sam file to BAM file
+
+#Use samtools view to convert the SAM file into a BAM file. BAM is the binary format corresponding to the SAM text format. Run:
+
+samtools view -bS eg2.sam > eg2.bam
+
+#Use samtools sort to convert the BAM file to a sorted BAM file.
+
+samtools sort eg2.bam -o eg2.sorted.bam
+
+We now have a sorted BAM file called eg2.sorted.bam. Sorted BAM is a useful format because the alignments are (a) compressed, which is convenient for long-term storage, and (b) sorted, which is convenient for variant discovery. To generate variant calls in VCF format, run:
+
+
+#To add RG in the bam file to make it readable to GATK, If alligned through Bowtie2 (In our pipeline, i have used direct BWA alignment)
+gatk AddOrReplaceReadGroups -I=MSS61.bam -O=61withRG.bam --SORT_ORDER=coordinate --RGLB=bar --RGPL=illumina --RGID=foo --RGSM=Sample1 --RGPU=unit1
+
+######reference index and dict file is necessary to start the GATK.
+
+# To make fai file
+samtools faidx ref.fasta
+
+###To make dictionary file
+gatk CreateSequenceDictionary -R ref.fasta -O ref.dict
+
+#To mark duplicates in BAM file along with report generation
+gatk MarkDuplicates -I MSS61_sort.bam -O work_MSS61_sort_marked.bam -M MSS61_MarkDup_report.txt
+
+# To call variant in each file separately
+gatk HaplotypeCaller -I work_MSS61_sort_marked_labeled.bam -R ref.fasta -ERC GVCF -O MSS61.vcf
+
+#To filter variant
+gatk VariantFiltration -R ref.fasta -V MSS61.vcf -O filtered_MSS61.vcf
+
+#To combine GVCF files
+gatk CombineGVCFs -R resources_broad_hg38_v0_Homo_sapiens_assembly38.fasta --variant filtered_MSS61.vcf --variant filtered_MSS62.vcf --variant filtered_MSS63.vcf --variant filtered_MSS64.vcf -O combined.g.vcf.gz
+
+# TO run genotypeGVCF
+gatk --java-options "-Xmx4g" GenotypeGVCFs -R resources_broad_hg38_v0_Homo_sapiens_assembly38.fasta -V combined.g.vcf.gz -O rawoutput.vcf.gz
+
+
+# TO recalibrate gvcf. It is either done only in SNP mode or indel mode. All option considers both.
+gatk VariantRecalibrator \
+   -R resources_broad_hg38_v0_Homo_sapiens_assembly38.fasta \
+   -V rawoutput.vcf.gz \
+   --resource hapmap,known=false,training=true,truth=true,prior=15.0:hapmap_3.3.hg38.vcf.gz \
+   --resource omni,known=false,training=true,truth=false,prior=12.0:G_omni2.5.hg38.vcf.gz \
+   --resource 1000G,known=false,training=true,truth=false,prior=10.0:G_phase1.snps.high_confidence.hg38.vcf.gz \
+   --resource dbsnp,known=true,training=false,truth=false,prior=2.0:Homo_sapiens_assembly38.dbsnp138.vcf \
+   -an QD -an MQ -an MQRankSum -an ReadPosRankSum -an FS -an SOR \
+   -mode SNP \
+   -O output.recal \
+   --tranches-file output.tranches \
+   --rscript-file output.plots.R
+
+Apply vqsr is step that provides r plots based on simulation with training and test data sets.
+
+Above file called output.recal is desired file.
+
+#snpEff annotations codes from where we observed that mutations are present in heterochromatin region or non-coding region
+
+java -Xmx8G -jar SNPEFF/snpEff.jar eff hg38 Input.vcf > na12878_q20_annot_snpEff.vcf
+
+#For extraction of fasta sequences for anlalysis of sequences or pattern of mutations or to be used for RepeatMasker analysis
+
+bedtools getfasta -fi /home/kumar/HWG/Michael/Resource/resources_broad_hg38_v0_Homo_sapiens_assembly38.fasta -bed outputtriple.bed -fo out.fasta
+
+#RepeatMAsker analysis 
+conda activate RepeatMasker
+RepeatMasker -e hmmer -species human /home/kumar/HWG/Michael/Resource/MSS61.fasta
+RepeatMasker -e hmmer -species human /home/kumar/HWG/Michael/Resource/MSS62.fasta
+RepeatMasker -e hmmer -species human /home/kumar/HWG/Michael/Resource/MSS63.fasta
+RepeatMasker -e hmmer -species human /home/kumar/HWG/Michael/Resource/MSS64.fasta
+
+#Program that was used to either split the samples or multiplex it/ Find the barcodes in the reads for 50M library or shRNA screens with modifications of writing the codes.
+NGS BArcode splitter
+cat MS102.fq | fastx_barcode_splitter.pl --bcfile 18barcode.txt --bol --mismatches 1 --prefix /home/kumar/GeneticScreen/MS102/bla_ --suffix ".txt"
+
+Grep_to take 20nt before string along with string
+grep -E -o ".{0,20}TTGACC." bla_BC18.txt > grep.txt
+
+Remove last string (18nt before and remove last 2)
+cat grep.txt |colrm 19
