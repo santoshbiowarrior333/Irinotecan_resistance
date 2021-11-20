@@ -1,0 +1,49 @@
+cd ../
+
+#Commands for FASTQC and trim galore
+
+
+#To make excutable forloop
+nano filename for making it as loop and write command
+control x to exit
+choose yes to save it
+
+# Make it excutable
+ chmod 755 filename
+755 runs all file types 
+Should show file in green colour now
+
+#To run the command
+
+bash qc_trimm 
+
+for fileNum in {1..12}
+do
+        file=/home/SequencingData/kumar/Resistance_Irinotecan/BC_${fileNum}.fastq.gz
+        nohup trim_galore --fastqc $file > ${fileNum}.out & 
+done
+
+$ top -u username to see the progress
+
+#After trimming and quality control we run alignment of our fastq files to reference sequence
+
+for fileNum in {1..12}
+do
+        file=/home/kumar/trim_galore_and_fastqc/BC_${fileNum}_trimmed.fq.gz
+        ref=/home/Genomes/Human/hg38/UCSC/HISAT2/hg38_tran/genome_tran
+        nohup hisat2 -x $ref -U $file 1> $fileNum.sam 2> $fileNum.out &
+
+done 
+
+#After we sam file format from alignment we need to convert that file to Bam file format for counting step
+samtools view -S -b /home/kumar/Resistance_Irinotecan/1.sam -o 1.bam
+#Run all codes by changing the sample numbers to convert to BAM
+
+#After alignment we use output file of alignment to count the number of the reads per sample
+
+featureCounts -T 16 -a /home/Genomes/Human/hg38/ensembl/Homo_sapiens.GRCh38.97.gtf -o featurecounts.txt /home/kumar/Resistance_Irinotecan/alignment_bam/1.bam
+/............../home/kumar/Resistance_Irinotecan/alignment_bam/12.bam
+
+#Last code will give featureCount file that will be used further in R environment to calculate differential expression of genes using edgeR.
+
+#********End of codes******
