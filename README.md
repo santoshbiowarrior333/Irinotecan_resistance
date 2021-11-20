@@ -1,6 +1,8 @@
 # Irinotecan_resistance
 Evolution of drug resistance in cancer cells involves generation of numerous mutations in non-coding genome that reduces the chances of DNA breaks
-Authors
+
+
+/Authors
 Santosh Kumar1†, Valid Gahramanov1†, Julia Yaglom1, Shivani Patel1†, Lukasz Kaczmarczyk1, Ivan Alexandrov2, Gabi Gerlitz1, Mali Salmon-Divon1, Michael Y. Sherman1*
 
 Affiliations 
